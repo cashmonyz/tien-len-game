@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiến Lên - Vietnamese Card Game</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // Lucide React icons as simple SVG components
+        const Sparkles = ({ className, size = 24 }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v18M3 12h18M6.34 6.34l11.32 11.32M17.66 6.34L6.34 17.66"/>
+            </svg>
+        );
+        
+        const RotateCcw = ({ className, size = 24 }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+        );
+        
+        const Trophy = ({ className, size = 24 }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+            </svg>
+        );
+
+        function TienLenGame() {
+          const [gameState, setGameState] = useState('start');
+          const [deck, setDeck] = useState([]);
+          const [players, setPlayers] = useState([]);
+          const [currentPlayer, setCurrentPlayer] = useState(0);
+          const [lastPlay, setLastPlay] = useState(null);
+          const [selectedCards, setSelectedCards] = useState([]);
+          const [consecutivePasses, setConsecutivePasses] = useState(0);
+          const [winner, setWinner] = useState(null);
+          const [message, setMessage] = useState('');
+          const [roundWinner, setRoundWinner] = useState(null);
+
+          const suits = ['♠', '♣', '♦', '♥'];
+          const ranks = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
+
+          const createDeck = () => {
+            const newDeck = [];
+            suits.forEach((suit, suitIndex) => {
+              ranks.forEach((rank, rankIndex) => {
+                newDeck.push({
+                  suit,
+                  rank,
+                  suitValue: suitIndex,
+                  rankValue: rankIndex,
+                  id: `${rank}${suit}`
+                });
+              });
+            });
+            for (let i = newDeck.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [newDeck[i], newDeck[j]] = [newDeck[j], newDeck[i]];
+            }
+            return newDeck;
+          };
+
+          const dealCards = (shuffledDeck) => {
+            const newPlayers = [
+              { id: 0, name: 'You', hand: [], isAI: false },
+              { id: 1, name: 'AI Player 1', hand: [], isAI: true },
+              { id: 2, name: 'AI Player 2', hand: [], isAI: true },
+              { id: 3, name: 'AI Player 3', hand: [], isAI: true }
+            ];
+
+            shuffledDeck.forEach((card, index) => {
+              newPlayers[index % 4].hand.push(card);
+            });
+
+            newPlayers.forEach(player => {
+              player.hand.sort((a, b) => {
+                if (a.rankValue !== b.rankValue) return a.rankValue - b.rankValue;
+                return a.suitValue - b.suitValue;
+              });
+            });
+
+            let startingPlayer = 0;
+            newPlayers.forEach((player, index) => {
+              if (player.hand.some(card => card.rank === '3' && card.suit === '♠')) {
+                startingPlayer = index;
+              }
+            });
+
+            return { players: newPlayers, startingPlayer };
+          };
+
+          const startGame = () => {
+            const newDeck = createDeck();
+            const { players: newPlayers, startingPlayer } = dealCards(newDeck);
+            setDeck(newDeck);
+            setPlayers(newPlayers);
+            setCurrentPlayer(startingPlayer);
+            setLastPlay(null);
+            setSelectedCards([]);
+            setConsecutivePasses(0);
+            setWinner(null);
+            setRoundWinner(null);
+            setGameState('playing');
+            setMessage(`${newPlayers[startingPlayer].name} goes first (has 3♠)`);
+          };
+
+          const validatePlay = (cards) => {
+            if (cards.length === 0) return { valid: false, type: null };
+            if (cards.length === 1) return { valid: true, type: 'single' };
+            if (cards.length === 2) {
+              if (cards[0].rankValue === cards[1].rankValue) {
+                return { valid: true, type: 'pair' };
+              }
+              return { valid: false, type: null };
+            }
+            if (cards.length === 3) {
+              if (cards[0].rankValue === cards[1].rankValue && cards[1].rankValue === cards[2].rankValue) {
+                return { valid: true, type: 'triple' };
+              }
+              const sorted = [...cards].sort((a, b) => a.rankValue - b.rankValue);
+              if (sorted[1].rankValue === sorted[0].rankValue + 1 && sorted[2].rankValue === sorted[1].rankValue + 1) {
+                return { valid: true, type: 'sequence' };
+              }
+              return { valid: false, type: null };
+            }
+            if (cards.length >= 3) {
+              const sorted = [...cards].sort((a, b) => a.rankValue - b.rankValue);
+              let isSequence = true;
+              for (let i = 1; i < sorted.length; i++) {
+                if (sorted[i].rankValue !== sorted[i - 1].rankValue + 1) {
+                  isSequence = false;
+                  break;
+                }
+              }
+              if (isSequence) return { valid: true, type: 'sequence' };
+
+              if (cards.length % 2 === 0) {
+                const pairs = [];
+                for (let i = 0; i < sorted.length; i += 2) {
+                  if (sorted[i].rankValue === sorted[i + 1]?.rankValue) {
+                    pairs.push(sorted[i].rankValue);
+                  } else {
+                    return { valid: false, type: null };
+                  }
+                }
+                let isPairSequence = true;
+                for (let i = 1; i < pairs.length; i++) {
+                  if (pairs[i] !== pairs[i - 1] + 1) {
+                    isPairSequence = false;
+                    break;
+                  }
+                }
+                if (isPairSequence) return { valid: true, type: 'pair_sequence' };
+              }
+            }
+            return { valid: false, type: null };
+          };
+
+          const canBeatLastPlay = (newCards, lastPlayCards) => {
+            if (!lastPlayCards) return true;
+
+            const newPlay = validatePlay(newCards);
+            const oldPlay = validatePlay(lastPlayCards);
+
+            if (!newPlay.valid) return false;
+
+            if (oldPlay.type === 'single' && lastPlayCards[0].rank === '2' && newPlay.type === 'pair_sequence' && newCards.length === 6) {
+              return true;
+            }
+
+            if (newPlay.type !== oldPlay.type) return false;
+
+            if (newPlay.type === 'single') {
+              const newCard = newCards[0];
+              const oldCard = lastPlayCards[0];
+              if (newCard.rankValue > oldCard.rankValue) return true;
+              if (newCard.rankValue === oldCard.rankValue && newCard.suitValue > oldCard.suitValue) return true;
+              return false;
+            }
+
+            if (newPlay.type === 'pair') {
+              const newHighCard = newCards[0].suitValue > newCards[1].suitValue ? newCards[0] : newCards[1];
+              const oldHighCard = lastPlayCards[0].suitValue > lastPlayCards[1].suitValue ? lastPlayCards[0] : lastPlayCards[1];
+              if (newCards[0].rankValue > lastPlayCards[0].rankValue) return true;
+              if (newCards[0].rankValue === lastPlayCards[0].rankValue && newHighCard.suitValue > oldHighCard.suitValue) return true;
+              return false;
+            }
+
+            if (newPlay.type === 'triple') {
+              return newCards[0].rankValue > lastPlayCards[0].rankValue;
+            }
+
+            if (newPlay.type === 'sequence' || newPlay.type === 'pair_sequence') {
+              if (newCards.length !== lastPlayCards.length) return false;
+              const newHighest = Math.max(...newCards.map(c => c.rankValue));
+              const oldHighest = Math.max(...lastPlayCards.map(c => c.rankValue));
+              if (newHighest > oldHighest) return true;
+              if (newHighest === oldHighest) {
+                const newHighCard = newCards.reduce((max, c) => c.rankValue === newHighest && c.suitValue > max.suitValue ? c : max, newCards[0]);
+                const oldHighCard = lastPlayCards.reduce((max, c) => c.rankValue === oldHighest && c.suitValue > max.suitValue ? c : max, lastPlayCards[0]);
+                return newHighCard.suitValue > oldHighCard.suitValue;
+              }
+              return false;
+            }
+
+            return false;
+          };
+
+          const playCards = (playerIndex, cards) => {
+            if (cards.length === 0) {
+              setConsecutivePasses(prev => prev + 1);
+              setMessage(`${players[playerIndex].name} passed`);
+              
+              if (consecutivePasses + 1 >= 3) {
+                const roundWinnerIndex = lastPlay?.player;
+                setRoundWinner(roundWinnerIndex);
+                setLastPlay(null);
+                setConsecutivePasses(0);
+                setCurrentPlayer(roundWinnerIndex);
+                setMessage(`${players[roundWinnerIndex].name} won the round! Can play anything.`);
+              } else {
+                moveToNextPlayer();
+              }
+              return;
+            }
+
+            const play = validatePlay(cards);
+            if (!play.valid) {
+              if (playerIndex === 0) setMessage('Invalid card combination!');
+              return;
+            }
+
+            const canPlayAnything = roundWinner === playerIndex && lastPlay === null;
+            
+            if (!canPlayAnything && !canBeatLastPlay(cards, lastPlay?.cards)) {
+              if (playerIndex === 0) setMessage('Cannot beat the last play!');
+              return;
+            }
+
+            const newPlayers = [...players];
+            newPlayers[playerIndex].hand = newPlayers[playerIndex].hand.filter(
+              card => !cards.find(c => c.id === card.id)
+            );
+
+            setPlayers(newPlayers);
+            setLastPlay({ cards, player: playerIndex });
+            setConsecutivePasses(0);
+            setSelectedCards([]);
+            
+            if (roundWinner === playerIndex) {
+              setRoundWinner(null);
+            }
+            
+            setMessage(`${players[playerIndex].name} played ${play.type}!`);
+
+            if (newPlayers[playerIndex].hand.length === 0) {
+              setWinner(playerIndex);
+              setGameState('gameOver');
+              return;
+            }
+
+            moveToNextPlayer();
+          };
+
+          const moveToNextPlayer = () => {
+            setCurrentPlayer(prev => (prev + 1) % 4);
+          };
+
+          useEffect(() => {
+            if (gameState !== 'playing') return;
+            if (!players[currentPlayer]?.isAI) return;
+
+            const timer = setTimeout(() => {
+              const aiPlayer = players[currentPlayer];
+              const hand = aiPlayer.hand;
+
+              let playAttempt = null;
+
+              for (const card of hand) {
+                if (canBeatLastPlay([card], lastPlay?.cards)) {
+                  playAttempt = [card];
+                  break;
+                }
+              }
+
+              if (!playAttempt) {
+                for (let i = 0; i < hand.length - 1; i++) {
+                  if (hand[i].rankValue === hand[i + 1].rankValue) {
+                    const pair = [hand[i], hand[i + 1]];
+                    if (canBeatLastPlay(pair, lastPlay?.cards)) {
+                      playAttempt = pair;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!playAttempt) {
+                for (let i = 0; i < hand.length - 2; i++) {
+                  if (hand[i].rankValue === hand[i + 1].rankValue && hand[i + 1].rankValue === hand[i + 2].rankValue) {
+                    const triple = [hand[i], hand[i + 1], hand[i + 2]];
+                    if (canBeatLastPlay(triple, lastPlay?.cards)) {
+                      playAttempt = triple;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              playCards(currentPlayer, playAttempt || []);
+            }, 1500);
+
+            return () => clearTimeout(timer);
+          }, [currentPlayer, gameState, lastPlay]);
+
+          const toggleCardSelection = (card) => {
+            if (currentPlayer !== 0 || gameState !== 'playing') return;
+            
+            setSelectedCards(prev => {
+              const isSelected = prev.find(c => c.id === card.id);
+              if (isSelected) {
+                return prev.filter(c => c.id !== card.id);
+              } else {
+                return [...prev, card];
+              }
+            });
+          };
+
+          const getCardColor = (suit) => {
+            if (suit === '♥' || suit === '♦') return 'text-red-600';
+            return 'text-gray-900';
+          };
+
+          if (gameState === 'start') {
+            return (
+              <div className="w-full h-screen bg-gradient-to-br from-emerald-900 via-teal-800 to-cyan-900 flex items-center justify-center p-4">
+                <div className="text-center">
+                  <h1 className="text-7xl font-bold text-yellow-400 mb-4 drop-shadow-2xl" style={{ fontFamily: 'Georgia, serif' }}>
+                    Tiến Lên
+                  </h1>
+                  <p className="text-3xl text-yellow-200 mb-2" style={{ fontFamily: 'Georgia, serif' }}>十三 (Thirteen)</p>
+                  <p className="text-xl text-teal-200 mb-8 max-w-md mx-auto">
+                    Vietnamese climbing card game. Get rid of all your cards first to win!
+                  </p>
+                  <div className="bg-black bg-opacity-30 backdrop-blur-sm rounded-2xl p-6 mb-8 max-w-lg mx-auto text-left">
+                    <h3 className="text-yellow-400 text-xl font-bold mb-3">Rules:</h3>
+                    <ul className="text-teal-100 space-y-2">
+                      <li>• 4 players, 13 cards each</li>
+                      <li>• Player with 3♠ starts</li>
+                      <li>• Play singles, pairs, triples, or sequences</li>
+                      <li>• 2s are the highest cards</li>
+                      <li>• Suit ranking: ♠ ♣ ♦ ♥ (low to high)</li>
+                      <li>• 3-pair sequence beats a single 2</li>
+                    </ul>
+                  </div>
+                  <button
+                    onClick={startGame}
+                    className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 px-12 py-4 rounded-full text-2xl font-bold hover:scale-110 transform transition shadow-2xl"
+                  >
+                    <Sparkles className="inline mr-2" size={28} />
+                    Start Game
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          if (gameState === 'gameOver') {
+            return (
+              <div className="w-full h-screen bg-gradient-to-br from-purple-900 via-pink-800 to-orange-900 flex items-center justify-center p-4">
+                <div className="text-center">
+                  <Trophy className="mx-auto text-yellow-400 mb-6 animate-bounce" size={100} />
+                  <h1 className="text-6xl font-bold text-yellow-400 mb-4 drop-shadow-2xl">
+                    {players[winner]?.name} Wins!
+                  </h1>
+                  <p className="text-2xl text-pink-200 mb-8">
+                    Congratulations! 🎉
+                  </p>
+                  <button
+                    onClick={startGame}
+                    className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 px-12 py-4 rounded-full text-2xl font-bold hover:scale-110 transform transition shadow-2xl"
+                  >
+                    <RotateCcw className="inline mr-2" size={24} />
+                    Play Again
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="w-full h-screen bg-gradient-to-br from-emerald-900 via-teal-800 to-cyan-900 flex flex-col p-4">
+              <div className="flex justify-around mb-4">
+                {[1, 2, 3].map(idx => (
+                  <div
+                    key={idx}
+                    className={`bg-gradient-to-br from-green-800 to-green-900 rounded-xl p-4 min-w-[200px] ${
+                      currentPlayer === idx ? 'ring-4 ring-yellow-400 shadow-2xl' : 'opacity-70'
+                    }`}
+                  >
+                    <div className="font-bold text-yellow-300 mb-2">{players[idx]?.name}</div>
+                    <div className="flex gap-1 flex-wrap justify-center">
+                      {players[idx]?.hand.map((card, i) => (
+                        <div
+                          key={i}
+                          className="w-8 h-12 bg-white rounded border-2 border-gray-700"
+                        />
+                      ))}
+                    </div>
+                    <div className="text-teal-200 text-sm mt-2 text-center">
+                      {players[idx]?.hand.length} cards
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <div className="bg-black bg-opacity-40 backdrop-blur-sm px-6 py-3 rounded-full mb-4">
+                  <p className="text-yellow-300 text-lg font-semibold">{message}</p>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-700 to-green-800 rounded-3xl p-8 min-h-[200px] min-w-[400px] flex items-center justify-center shadow-2xl border-4 border-yellow-600">
+                  {lastPlay ? (
+                    <div>
+                      <p className="text-yellow-300 text-sm mb-3 text-center">
+                        Last played by {players[lastPlay.player]?.name}
+                      </p>
+                      <div className="flex gap-2 justify-center">
+                        {lastPlay.cards.map((card, i) => (
+                          <div
+                            key={i}
+                            className="w-16 h-24 bg-white rounded-lg shadow-xl border-2 border-gray-700 flex flex-col items-center justify-center transform hover:scale-105 transition"
+                          >
+                            <div className={`text-3xl font-bold ${getCardColor(card.suit)}`}>
+                              {card.rank}
+                            </div>
+                            <div className={`text-3xl ${getCardColor(card.suit)}`}>
+                              {card.suit}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <p className="text-yellow-200 text-xl mb-2">
+                        {roundWinner !== null ? (
+                          <>🏆 {players[roundWinner]?.name} won the round!</>
+                        ) : (
+                          <>Table is clear</>
+                        )}
+                      </p>
+                      <p className="text-yellow-300 text-sm">
+                        {currentPlayer === roundWinner || roundWinner === null ? 'Play anything!' : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className={`bg-gradient-to-br from-green-800 to-green-900 rounded-xl p-4 ${
+                currentPlayer === 0 ? 'ring-4 ring-yellow-400 shadow-2xl' : 'opacity-70'
+              }`}>
+                <div className="font-bold text-yellow-300 mb-3 text-center text-xl">
+                  Your Hand ({players[0]?.hand.length} cards)
+                </div>
+                <div className="flex gap-2 justify-center flex-wrap mb-4">
+                  {players[0]?.hand.map((card) => {
+                    const isSelected = selectedCards.find(c => c.id === card.id);
+                    return (
+                      <div
+                        key={card.id}
+                        onClick={() => toggleCardSelection(card)}
+                        className={`w-16 h-24 bg-white rounded-lg shadow-xl border-2 border-gray-700 flex flex-col items-center justify-center cursor-pointer transform transition ${
+                          isSelected ? 'scale-110 -translate-y-4 ring-4 ring-yellow-400' : 'hover:scale-105 hover:-translate-y-2'
+                        }`}
+                      >
+                        <div className={`text-3xl font-bold ${getCardColor(card.suit)}`}>
+                          {card.rank}
+                        </div>
+                        <div className={`text-3xl ${getCardColor(card.suit)}`}>
+                          {card.suit}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {currentPlayer === 0 && (
+                  <div className="flex gap-4 justify-center">
+                    <button
+                      onClick={() => playCards(0, selectedCards)}
+                      disabled={selectedCards.length === 0}
+                      className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 px-8 py-3 rounded-full text-lg font-bold hover:scale-105 transform transition shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Play Cards
+                    </button>
+                    <button
+                      onClick={() => playCards(0, [])}
+                      className="bg-gradient-to-r from-red-500 to-red-600 text-white px-8 py-3 rounded-full text-lg font-bold hover:scale-105 transform transition shadow-xl"
+                    >
+                      Pass
+                    </button>
+                    {selectedCards.length > 0 && (
+                      <button
+                        onClick={() => setSelectedCards([])}
+                        className="bg-gradient-to-r from-gray-500 to-gray-600 text-white px-8 py-3 rounded-full text-lg font-bold hover:scale-105 transform transition shadow-xl"
+                      >
+                        Clear Selection
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<TienLenGame />, document.getElementById('root'));
+    </script>
+</body>
+</html>
